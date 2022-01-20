@@ -22,6 +22,6 @@ func ResponseJSON(ctx *gin.Context, statusCode int, code int, msg string, data i
 
 // 返回字符串格式
 func ResponseString(ctx *gin.Context, statusCode int, msg string) {
-	ctx.JSON(statusCode, msg)
+	ctx.String(statusCode, msg)
 	return
 }
