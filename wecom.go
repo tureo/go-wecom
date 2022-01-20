@@ -150,19 +150,7 @@ func VerifyURL(c *gin.Context) {
 		return
 	}
 
-	token := ""
-	if Token == "" {
-		access_token, err := GetTokenFromWecom(CorpID, AgentSecret)
-		if err != nil {
-			fmt.Println("verify url err: ", err)
-			ResponseString(c, http.StatusInternalServerError, err.Error())
-			return
-		}
-		token = access_token
-	} else {
-
-		token = Token
-	}
+	token := Token                   // 这里是回调URL的token，不是调用接口的access_token
 	receiverId := CorpID             // 这里是corpid
 	encodingAeskey := EncodingAeskey // 由英文或数字组成且长度为43位的自定义字符串
 	wxcpt := wxbizmsgcrypt.NewWXBizMsgCrypt(token, encodingAeskey, receiverId, wxbizmsgcrypt.XmlType)
