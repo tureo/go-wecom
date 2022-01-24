@@ -15,11 +15,13 @@ func setupRouter() *gin.Engine {
 
 	wecom := r.Group("/wecom")
 	{
+		// 验证回调URL
 		wecom.GET("", func(c *gin.Context) {
 			VerifyURL(c)
 		})
+		// 处理回调消息
 		wecom.POST("", func(c *gin.Context) {
-			ResponseString(c, 200, "wecom post data")
+			Callback(c)
 		})
 	}
 

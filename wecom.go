@@ -2,18 +2,21 @@ package main
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sbzhu/weworkapi_golang/wxbizmsgcrypt"
 )
 
 // 企业微信请求参数
-type WecomVerifyURLReq struct {
+type VerifyURLReq struct {
 	MsgSignature string `form:"msg_signature" json:"msg_signature" example:"5c45ff5e21c57e6ad56bac8758b79b1d9ac89fd3"`                                     // 企业微信加密签名
 	Timestamp    int    `form:"timestamp" json:"timestamp" example:"1409659589"`                                                                           // 时间戳
 	Nonce        string `form:"nonce" json:"nonce" example:"263014780"`                                                                                    // 随机数
@@ -65,9 +68,50 @@ type GetIPResp struct {
 	IPList  []string `json:"ip_list"` // 企业微信回调的IP段
 }
 
-// GetTokenFromWecom
+// 企业微信回调url请求参数
+type CallbackReq struct {
+	MsgSignature string `form:"msg_signature" json:"msg_signature" example:"5c45ff5e21c57e6ad56bac8758b79b1d9ac89fd3"` // 企业微信加密签名
+	Timestamp    int    `form:"timestamp" json:"timestamp" example:"1409659589"`                                       // 时间戳
+	Nonce        string `form:"nonce" json:"nonce" example:"263014780"`                                                // 随机数
+}
+
+// 企业微信回调消息体解密后的数据
+type ReqMsgContent struct {
+	ToUserName   string `xml:"ToUserName"`   // 企业微信的CorpID
+	AgentID      string `xml:"AgentID"`      // 接收的应用id
+	FromUserName string `xml:"FromUserName"` // 发送者的userid
+	EventKey     string `xml:"EventKey"`     // 按钮key值
+	TaskID       string `xml:"TaskId"`       // 任务id
+}
+
+// // 企业微信回调被动响应包文本数据
+// type RespText struct {
+// 	XMLName      xml.Name `xml:"xml"`
+// 	ToUserName   string   `xml:"ToUserName"`   // 成员UserID
+// 	FromUserName string   `xml:"FromUserName"` // 企业微信CorpID
+// 	CreateTime   int      `xml:"CreateTime"`   // 消息创建时间
+// 	MsgType      string   `xml:"MsgType"`      // 消息类型
+// 	Content      string   `xml:"Content"`      // 文本消息内容
+// }
+
+// 企业微信回调被动响应包更新按钮文案数据
+type RespUpdateButton struct {
+	XMLName      xml.Name            `xml:"xml"`
+	ToUserName   string              `xml:"ToUserName"`   // 成员UserID
+	FromUserName string              `xml:"FromUserName"` // 企业微信CorpID
+	CreateTime   int                 `xml:"CreateTime"`   // 消息创建时间
+	MsgType      string              `xml:"MsgType"`      // 消息类型
+	Button       UpdateButtonReplace `xml:"Button"`       // 按钮
+}
+
+// 更新按钮文案
+type UpdateButtonReplace struct {
+	ReplaceName string `xml:"ReplaceName"` // 点击卡片按钮后显示的按钮名称
+}
+
+// GetToken
 // @Description: 从企业微信获取应用调用接口token
-func GetTokenFromWecom(corpid, corpsecret string) (access_token string, err error) {
+func GetToken(corpid, corpsecret string) (access_token string, err error) {
 	fmt.Println("get token from wecom...")
 	getTokenResp := new(GetTokenResp)
 	content, err := HttpGet(Host + "/cgi-bin/gettoken?corpid=" + corpid + "&corpsecret=" + corpsecret)
@@ -90,9 +134,9 @@ func GetTokenFromWecom(corpid, corpsecret string) (access_token string, err erro
 	return access_token, nil
 }
 
-// SendMsgToWecom
+// SendMsg
 // @Description: 发送消息到企业微信接口
-func SendMsgToWecom(access_token string, body io.Reader) (sendMsgResp *SendMsgResp, err error) {
+func SendMsg(access_token string, body io.Reader) (sendMsgResp *SendMsgResp, err error) {
 	fmt.Println("send message to wecom...")
 
 	content, err := HttpPost(Host+"/cgi-bin/message/send?access_token="+access_token, "application/json", body)
@@ -115,9 +159,9 @@ func SendMsgToWecom(access_token string, body io.Reader) (sendMsgResp *SendMsgRe
 	return sendMsgResp, nil
 }
 
-// GetIPFromWecom
+// GetIP
 // @Description: 获取企业微信服务器的ip段
-func GetIPFromWecom(access_token string) (ipList []string, err error) {
+func GetIP(access_token string) (ipList []string, err error) {
 	fmt.Println("get ip from wecom...")
 	content, err := HttpGet(Host + "/cgi-bin/getcallbackip?access_token=" + access_token)
 	if err != nil {
@@ -142,7 +186,7 @@ func GetIPFromWecom(access_token string) (ipList []string, err error) {
 // VerifyURL
 // @Description: 验证回调URL
 func VerifyURL(c *gin.Context) {
-	req := new(WecomVerifyURLReq)
+	req := new(VerifyURLReq)
 
 	if err := c.ShouldBindQuery(&req); err != nil {
 		fmt.Println("verify url err: ", err)
@@ -171,4 +215,92 @@ func VerifyURL(c *gin.Context) {
 	fmt.Println("verify url success echoStr: ", string(echoStr))
 
 	ResponseString(c, http.StatusOK, string(echoStr))
+}
+
+// Callback
+// @Description: 接收企业微信回调业务数据
+func Callback(c *gin.Context) {
+	req := new(CallbackReq)
+	token := Token                   // 这里是回调URL的token，不是调用接口的access_token
+	receiverId := CorpID             // 这里是corpid
+	encodingAeskey := EncodingAeskey // 由英文或数字组成且长度为43位的自定义字符串
+	wxcpt := wxbizmsgcrypt.NewWXBizMsgCrypt(token, encodingAeskey, receiverId, wxbizmsgcrypt.XmlType)
+
+	// 解析url参数
+	if err := c.ShouldBindQuery(&req); err != nil {
+		fmt.Println("callback req params err: ", err)
+		ResponseString(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	fmt.Println("callback req params: ", req)
+
+	// 读取post body xml 数据
+	reqData, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		fmt.Println("callback req body err: ", err)
+		ResponseString(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	fmt.Println("callback req body: ", string(reqData))
+
+	// 验证并获取明文
+	msg, cryptErr := wxcpt.DecryptMsg(req.MsgSignature, strconv.Itoa(req.Timestamp), req.Nonce, reqData)
+	if cryptErr != nil {
+		fmt.Println("callback decrypt msg err: ", cryptErr.ErrMsg)
+		ResponseString(c, http.StatusBadRequest, cryptErr.ErrMsg)
+		return
+	}
+	fmt.Println("callback decrypt msg: ", string(msg))
+
+	// 解析xml
+	var reqMsgContent ReqMsgContent
+	err = xml.Unmarshal(msg, &reqMsgContent)
+	if err != nil {
+		fmt.Println("callback unmarshal xml err: ", err)
+		ResponseString(c, http.StatusBadRequest, err.Error())
+	}
+	fmt.Println("callback unmarshal xml: ", reqMsgContent)
+
+	// ********************************* //
+	// 业务处理
+	// TODO
+	var buttonReplaceText = ""
+	if reqMsgContent.EventKey == "approve" {
+		buttonReplaceText = "审核已通过"
+	}
+	if reqMsgContent.EventKey == "reject" {
+		buttonReplaceText = "审核已驳回"
+	}
+
+	// ********************************* //
+	// 构造被动响应消息
+	respMsgContent := &RespUpdateButton{
+		ToUserName:   reqMsgContent.FromUserName,
+		FromUserName: reqMsgContent.ToUserName,
+		CreateTime:   int(time.Now().Unix()),
+		MsgType:      "update_button",
+		Button: UpdateButtonReplace{
+			ReplaceName: buttonReplaceText,
+		},
+	}
+
+	// 消息内容转成xml文本
+	respMsgContentXML, err := xml.Marshal(respMsgContent)
+	if err != nil {
+		fmt.Println("callback marshal xml err: ", err)
+		ResponseString(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	fmt.Println("callback marshal xml : ", string(respMsgContentXML))
+
+	// 加密签名
+	encryptMsg, cryptErr := wxcpt.EncryptMsg(string(respMsgContentXML), strconv.Itoa(req.Timestamp), req.Nonce)
+	if cryptErr != nil {
+		fmt.Println("callback encrypt msg eror: ", cryptErr.ErrMsg)
+		ResponseString(c, http.StatusInternalServerError, cryptErr.ErrMsg)
+	}
+	fmt.Println("callback encrypt msg : ", string(encryptMsg))
+
+	ResponseString(c, http.StatusOK, string(encryptMsg))
 }
