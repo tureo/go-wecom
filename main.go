@@ -30,5 +30,14 @@ func setupRouter() *gin.Engine {
 
 func main() {
 	r := setupRouter()
+	// // 测试发送消息到企业微信
+	// go func() {
+	// 	time.Sleep(time.Second * 5)
+	// 	// 发送模板卡片按钮交互消息
+	// 	SendMsgButtonTest()
+	// 	time.Sleep(time.Second * 5)
+	// 	// 发送文本消息
+	// 	SendMsgTextTest()
+	// }()
 	r.Run(":8000")
 }

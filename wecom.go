@@ -9,13 +9,12 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sbzhu/weworkapi_golang/wxbizmsgcrypt"
 )
 
-// 企业微信请求参数
+// 企业微信验证url请求参数
 type VerifyURLReq struct {
 	MsgSignature string `form:"msg_signature" json:"msg_signature" example:"5c45ff5e21c57e6ad56bac8758b79b1d9ac89fd3"`                                     // 企业微信加密签名
 	Timestamp    int    `form:"timestamp" json:"timestamp" example:"1409659589"`                                                                           // 时间戳
@@ -23,7 +22,7 @@ type VerifyURLReq struct {
 	EchoStr      string `form:"echostr" json:"echostr" example:"P9nAzCzyDtyTWESHep1vC5X9xho/qYX3Zpb4yKa9SKld1DsH3Iyt3tP3zNdtp+4RPcs8TgAE7OaBO+FZXvnaqQ=="` // 加密的字符串
 }
 
-// 获取token响应结构体
+// 获取token响应字段
 type GetTokenResp struct {
 	ErrCode     int    `json:"errcode"`      // 出错返回码
 	ErrMsg      string `json:"errmsg"`       // 返回码提示语
@@ -31,7 +30,7 @@ type GetTokenResp struct {
 	ExpiresIn   int    `json:"expires_in"`   // 凭证的有效时间（秒）
 }
 
-// 发送消息响应结构体
+// 发送消息企业微信响应字段
 type SendMsgResp struct {
 	ErrCode      int    `json:"errcode"`       // 返回码
 	ErrMsg       string `json:"errmsg"`        // 对返回码的文本描述内容
@@ -42,32 +41,14 @@ type SendMsgResp struct {
 	ResponseCode string `json:"response_code"` // 仅消息类型为“按钮交互型”，“投票选择型”和“多项选择型”的模板卡片消息返回
 }
 
-// 发送文本消息
-type SendMsgText struct {
-	Touser                 string `json:"touser"`                   // 指定接收消息的成员，成员ID列表
-	Toparty                string `json:"toparty"`                  // 指定接收消息的部门，部门ID列表
-	ToTag                  string `json:"totag"`                    // 指定接收消息的标签，标签ID列表
-	MsgType                string `json:"msgtype"`                  // 消息类型
-	AgentID                int    `json:"agentid"`                  // 企业应用的id
-	Text                   Text   `json:"text"`                     // 消息内容
-	Safe                   int    `json:"safe"`                     // 是否是保密消息
-	EnableIDTrans          int    `json:"enable_id_trans"`          // 是否开启id转译
-	EnableDuplicateCheck   int    `json:"enable_duplicate_check"`   // 是否开启重复消息检查
-	DuplicateCheckInterval int    `json:"duplicate_check_interval"` // 是否重复消息检查的时间间隔
-}
-
-// 文本消息内容
-type Text struct {
-	Content string `json:"content"` // 消息内容
-}
-
-// 获取服务器ip响应结构体
+// 获取服务器ip响应字段
 type GetIPResp struct {
 	ErrCode int      `json:"errcode"` // 错误码
 	ErrMsg  string   `json:"errmsg"`  // 错误信息
 	IPList  []string `json:"ip_list"` // 企业微信回调的IP段
 }
 
+// ***callback start***//
 // 企业微信回调url请求参数
 type CallbackReq struct {
 	MsgSignature string `form:"msg_signature" json:"msg_signature" example:"5c45ff5e21c57e6ad56bac8758b79b1d9ac89fd3"` // 企业微信加密签名
@@ -75,39 +56,16 @@ type CallbackReq struct {
 	Nonce        string `form:"nonce" json:"nonce" example:"263014780"`                                                // 随机数
 }
 
-// 企业微信回调消息体解密后的数据
-type ReqMsgContent struct {
+// 企业微信回调消息体解密后的公共字段
+type CallbackMsgContentCommon struct {
 	ToUserName   string `xml:"ToUserName"`   // 企业微信的CorpID
-	AgentID      string `xml:"AgentID"`      // 接收的应用id
-	FromUserName string `xml:"FromUserName"` // 发送者的userid
-	EventKey     string `xml:"EventKey"`     // 按钮key值
-	TaskID       string `xml:"TaskId"`       // 任务id
+	FromUserName string `xml:"FromUserName"` // 成员UserID
+	CreateTime   int    `xml:"CreateTime"`   // 消息创建时间戳
+	MsgType      string `xml:"MsgType"`      // 消息类型
+	AgentID      int    `xml:"AgentID"`      // 企业应用的id
 }
 
-// // 企业微信回调被动响应包文本数据
-// type RespText struct {
-// 	XMLName      xml.Name `xml:"xml"`
-// 	ToUserName   string   `xml:"ToUserName"`   // 成员UserID
-// 	FromUserName string   `xml:"FromUserName"` // 企业微信CorpID
-// 	CreateTime   int      `xml:"CreateTime"`   // 消息创建时间
-// 	MsgType      string   `xml:"MsgType"`      // 消息类型
-// 	Content      string   `xml:"Content"`      // 文本消息内容
-// }
-
-// 企业微信回调被动响应包更新按钮文案数据
-type RespUpdateButton struct {
-	XMLName      xml.Name            `xml:"xml"`
-	ToUserName   string              `xml:"ToUserName"`   // 成员UserID
-	FromUserName string              `xml:"FromUserName"` // 企业微信CorpID
-	CreateTime   int                 `xml:"CreateTime"`   // 消息创建时间
-	MsgType      string              `xml:"MsgType"`      // 消息类型
-	Button       UpdateButtonReplace `xml:"Button"`       // 按钮
-}
-
-// 更新按钮文案
-type UpdateButtonReplace struct {
-	ReplaceName string `xml:"ReplaceName"` // 点击卡片按钮后显示的按钮名称
-}
+// ***callback end***//
 
 // GetToken
 // @Description: 从企业微信获取应用调用接口token
@@ -208,8 +166,9 @@ func VerifyURL(c *gin.Context) {
 	// 验证并获取明文
 	echoStr, cryptErr := wxcpt.VerifyURL(verifyMsgSign, verifyTimestamp, verifyNonce, verifyEchoStr)
 	if cryptErr != nil {
-		fmt.Println("verify url fail: ", cryptErr.ErrMsg)
-		ResponseString(c, http.StatusBadRequest, cryptErr.ErrMsg)
+		errStr := strconv.Itoa(cryptErr.ErrCode) + cryptErr.ErrMsg
+		fmt.Println("verify url fail: ", errStr)
+		ResponseString(c, http.StatusBadRequest, errStr)
 		return
 	}
 	fmt.Println("verify url success echoStr: ", string(echoStr))
@@ -247,60 +206,45 @@ func Callback(c *gin.Context) {
 	// 验证并获取明文
 	msg, cryptErr := wxcpt.DecryptMsg(req.MsgSignature, strconv.Itoa(req.Timestamp), req.Nonce, reqData)
 	if cryptErr != nil {
-		fmt.Println("callback decrypt msg err: ", cryptErr.ErrMsg)
-		ResponseString(c, http.StatusBadRequest, cryptErr.ErrMsg)
+		errStr := strconv.Itoa(cryptErr.ErrCode) + cryptErr.ErrMsg
+		fmt.Println("callback decrypt msg err: ", errStr)
+		ResponseString(c, http.StatusBadRequest, errStr)
 		return
 	}
 	fmt.Println("callback decrypt msg: ", string(msg))
 
-	// 解析xml
-	var reqMsgContent ReqMsgContent
-	err = xml.Unmarshal(msg, &reqMsgContent)
+	// 解析消息内容xml
+	var reqMsgContentCommon CallbackMsgContentCommon
+	err = xml.Unmarshal(msg, &reqMsgContentCommon)
 	if err != nil {
-		fmt.Println("callback unmarshal xml err: ", err)
+		fmt.Println("callback unmarshal common xml err: ", err)
 		ResponseString(c, http.StatusBadRequest, err.Error())
 	}
-	fmt.Println("callback unmarshal xml: ", reqMsgContent)
+	fmt.Println("callback unmarshal common xml: ", reqMsgContentCommon)
 
+	httpStatus := http.StatusOK
+	respMsg := []byte("")
 	// ********************************* //
-	// 业务处理
-	// TODO
-	var buttonReplaceText = ""
-	if reqMsgContent.EventKey == "approve" {
-		buttonReplaceText = "审核已通过"
-	}
-	if reqMsgContent.EventKey == "reject" {
-		buttonReplaceText = "审核已驳回"
+	// 业务开始处理
+
+	switch reqMsgContentCommon.MsgType {
+	// 文本消息
+	case "text":
+		fmt.Println("callback text msg type")
+		// 测试回复消息文本
+		httpStatus, respMsg, err = CallbackTextTest(c, wxcpt, req, msg)
+	// 事件消息
+	case "event":
+		fmt.Println("callback event msg type")
+		// 测试回复更新模板卡片按钮交互文案
+		httpStatus, respMsg, err = CallbackTemplateCardButtonTest(c, wxcpt, req, msg)
+	// 默认处理
+	default:
+		fmt.Println("callback default event msg type")
 	}
 
+	// 业务处理结束
 	// ********************************* //
-	// 构造被动响应消息
-	respMsgContent := &RespUpdateButton{
-		ToUserName:   reqMsgContent.FromUserName,
-		FromUserName: reqMsgContent.ToUserName,
-		CreateTime:   int(time.Now().Unix()),
-		MsgType:      "update_button",
-		Button: UpdateButtonReplace{
-			ReplaceName: buttonReplaceText,
-		},
-	}
 
-	// 消息内容转成xml文本
-	respMsgContentXML, err := xml.Marshal(respMsgContent)
-	if err != nil {
-		fmt.Println("callback marshal xml err: ", err)
-		ResponseString(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	fmt.Println("callback marshal xml : ", string(respMsgContentXML))
-
-	// 加密签名
-	encryptMsg, cryptErr := wxcpt.EncryptMsg(string(respMsgContentXML), strconv.Itoa(req.Timestamp), req.Nonce)
-	if cryptErr != nil {
-		fmt.Println("callback encrypt msg eror: ", cryptErr.ErrMsg)
-		ResponseString(c, http.StatusInternalServerError, cryptErr.ErrMsg)
-	}
-	fmt.Println("callback encrypt msg : ", string(encryptMsg))
-
-	ResponseString(c, http.StatusOK, string(encryptMsg))
+	ResponseString(c, httpStatus, string(respMsg))
 }
